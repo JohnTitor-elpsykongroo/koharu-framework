@@ -1,9 +1,13 @@
 package com.johntitor.koharu.context;
 
+import com.johntitor.koharu.exception.BeanCreationException;
+import jakarta.annotation.Nullable;
+
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.util.Arrays;
 
-public class BeanDefinition {
+public class BeanDefinition implements Comparable<BeanDefinition> {
 
     // 全局唯一的Bean Name:
     private String name;
@@ -31,100 +35,91 @@ public class BeanDefinition {
     private Method initMethod;
     private Method destroyMethod;
 
-
     public String getName() {
         return name;
-    }
-
-    public void setName(String name) {
-        this.name = name;
     }
 
     public Class<?> getBeanClass() {
         return beanClass;
     }
 
-    public void setBeanClass(Class<?> beanClass) {
-        this.beanClass = beanClass;
-    }
-
+    @Nullable
     public Object getInstance() {
         return instance;
     }
 
-    public void setInstance(Object instance) {
-        this.instance = instance;
+    public Object getRequiredInstance() {
+        if (this.instance == null) {
+            throw new BeanCreationException(String.format("Instance of bean with name '%s' and type '%s' is not instantiated during current stage.",
+                    this.getName(), this.getBeanClass().getName()));
+        }
+        return this.instance;
     }
 
+    @Nullable
     public Constructor<?> getConstructor() {
         return constructor;
     }
 
-    public void setConstructor(Constructor<?> constructor) {
-        this.constructor = constructor;
-    }
-
+    @Nullable
     public String getFactoryName() {
         return factoryName;
     }
 
-    public void setFactoryName(String factoryName) {
-        this.factoryName = factoryName;
-    }
-
+    @Nullable
     public Method getFactoryMethod() {
         return factoryMethod;
-    }
-
-    public void setFactoryMethod(Method factoryMethod) {
-        this.factoryMethod = factoryMethod;
     }
 
     public int getOrder() {
         return order;
     }
 
-    public void setOrder(int order) {
-        this.order = order;
-    }
-
     public boolean isPrimary() {
         return primary;
     }
 
-    public void setPrimary(boolean primary) {
-        this.primary = primary;
-    }
-
+    @Nullable
     public String getInitMethodName() {
         return initMethodName;
     }
 
-    public void setInitMethodName(String initMethodName) {
-        this.initMethodName = initMethodName;
-    }
-
+    @Nullable
     public String getDestroyMethodName() {
         return destroyMethodName;
     }
 
-    public void setDestroyMethodName(String destroyMethodName) {
-        this.destroyMethodName = destroyMethodName;
-    }
-
+    @Nullable
     public Method getInitMethod() {
         return initMethod;
     }
 
-    public void setInitMethod(Method initMethod) {
-        this.initMethod = initMethod;
-    }
-
+    @Nullable
     public Method getDestroyMethod() {
         return destroyMethod;
     }
 
-    public void setDestroyMethod(Method destroyMethod) {
-        this.destroyMethod = destroyMethod;
+    String getCreateDetail() {
+        if (this.factoryMethod != null) {
+            String params = String.join(", ", Arrays.stream(this.factoryMethod.getParameterTypes()).map(t -> t.getSimpleName()).toArray(String[]::new));
+            return this.factoryMethod.getDeclaringClass().getSimpleName() + "." + this.factoryMethod.getName() + "(" + params + ")";
+        }
+        return null;
+    }
+
+    @Override
+    public String toString() {
+        return "BeanDefinition [name=" + name + ", beanClass=" + beanClass.getName() + ", factory=" + getCreateDetail() + ", init-method="
+                + (initMethod == null ? "null" : initMethod.getName()) + ", destroy-method=" + (destroyMethod == null ? "null" : destroyMethod.getName())
+                + ", primary=" + primary + ", instance=" + instance + "]";
+    }
+
+    @Override
+    public int compareTo(BeanDefinition def) {
+        int cmp = Integer.compare(this.order, def.order);
+        if (cmp != 0) {
+            return cmp;
+        }
+        return this.name.compareTo(def.name);
     }
 }

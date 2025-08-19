@@ -14,13 +14,6 @@ public class AnnotationConfigApplicationContext {
 
     protected final Map<String, BeanDefinition> beans = new HashMap<String, BeanDefinition>();
 
-    public AnnotationConfigApplicationContext(Class<?> configClass, PropertyResolver propertyResolver) {
-
-        // 1.扫描获取所有Bean的Class类型:
-
-        // 2.创建Bean的定义:
-    }
-
 
 
 }
