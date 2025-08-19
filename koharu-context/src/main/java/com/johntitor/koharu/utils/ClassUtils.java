@@ -1,6 +1,7 @@
 package com.johntitor.koharu.utils;
 import com.johntitor.koharu.annotation.Bean;
 import com.johntitor.koharu.annotation.Component;
+import com.johntitor.koharu.annotation.Value;
 import com.johntitor.koharu.exception.BeanDefinitionException;
 import jakarta.annotation.Nullable;
 
@@ -52,6 +53,17 @@ public class ClassUtils {
             }
         }
         return a;
+    }
+
+    @Nullable
+    @SuppressWarnings("unchecked")
+    public static <A extends Annotation> A getAnnotation(Annotation[] annos, Class<A> annoClass) {
+        for (Annotation anno : annos) {
+            if (annoClass.isInstance(anno)) {
+                return (A) anno;
+            }
+        }
+        return null;
     }
 
 
@@ -146,4 +158,5 @@ public class ClassUtils {
         // 5. 找到多个 → 抛异常
         throw new BeanDefinitionException(String.format("Multiple methods with @%s found in class: %s", annoClass.getSimpleName(), clazz.getName()));
     }
+
 }

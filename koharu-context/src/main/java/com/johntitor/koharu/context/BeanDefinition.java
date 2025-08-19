@@ -6,6 +6,7 @@ import jakarta.annotation.Nullable;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Objects;
 
 public class BeanDefinition implements Comparable<BeanDefinition> {
 
@@ -145,6 +146,15 @@ public class BeanDefinition implements Comparable<BeanDefinition> {
             return this.factoryMethod.getDeclaringClass().getSimpleName() + "." + this.factoryMethod.getName() + "(" + params + ")";
         }
         return null;
+    }
+
+    public void setInstance(Object instance) {
+        Objects.requireNonNull(instance, "Bean instance is null.");
+        if (!this.beanClass.isAssignableFrom(instance.getClass())) {
+            throw new BeanCreationException(String.format("Instance '%s' of Bean '%s' is not the expected type: %s", instance, instance.getClass().getName(),
+                    this.beanClass.getName()));
+        }
+        this.instance = instance;
     }
 
     @Override
