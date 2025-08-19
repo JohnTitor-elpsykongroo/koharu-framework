@@ -35,6 +35,46 @@ public class BeanDefinition implements Comparable<BeanDefinition> {
     private Method initMethod;
     private Method destroyMethod;
 
+
+    public BeanDefinition(String name, Class<?> beanClass, Constructor<?> constructor, int order, boolean primary, String initMethodName,
+                          String destroyMethodName, Method initMethod, Method destroyMethod) {
+        this.name = name;
+        this.beanClass = beanClass;
+        this.constructor = constructor;
+        this.factoryName = null;
+        this.factoryMethod = null;
+        this.order = order;
+        this.primary = primary;
+        constructor.setAccessible(true);
+        setInitAndDestroyMethod(initMethodName, destroyMethodName, initMethod, destroyMethod);
+    }
+
+    public BeanDefinition(String name, Class<?> beanClass, String factoryName, Method factoryMethod, int order, boolean primary, String initMethodName,
+                          String destroyMethodName, Method initMethod, Method destroyMethod) {
+        this.name = name;
+        this.beanClass = beanClass;
+        this.constructor = null;
+        this.factoryName = factoryName;
+        this.factoryMethod = factoryMethod;
+        this.order = order;
+        this.primary = primary;
+        factoryMethod.setAccessible(true);
+        setInitAndDestroyMethod(initMethodName, destroyMethodName, initMethod, destroyMethod);
+    }
+
+    private void setInitAndDestroyMethod(String initMethodName, String destroyMethodName, Method initMethod, Method destroyMethod) {
+        this.initMethodName = initMethodName;
+        this.destroyMethodName = destroyMethodName;
+        if (initMethod != null) {
+            initMethod.setAccessible(true);
+        }
+        if (destroyMethod != null) {
+            destroyMethod.setAccessible(true);
+        }
+        this.initMethod = initMethod;
+        this.destroyMethod = destroyMethod;
+    }
+
     public String getName() {
         return name;
     }
