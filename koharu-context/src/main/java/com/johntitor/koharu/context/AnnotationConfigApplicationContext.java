@@ -17,7 +17,7 @@ import java.util.*;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
-public class AnnotationConfigApplicationContext {
+public class AnnotationConfigApplicationContext implements ConfigurableApplicationContext{
 
     protected final Logger logger = LoggerFactory.getLogger(getClass());
 
@@ -31,6 +31,8 @@ public class AnnotationConfigApplicationContext {
     private final int SUFFIX_LENGTH = SUFFIX.length();
 
     public AnnotationConfigApplicationContext(Class<?> configClass, PropertyResolver propertyResolver) {
+
+        ApplicationContextContainer.setApplicationContext(this);
 
         this.propertyResolver = propertyResolver;
 
@@ -47,6 +49,23 @@ public class AnnotationConfigApplicationContext {
 
         // 调用init方法:
         this.beans.values().forEach(this::initBean);
+
+        if (logger.isDebugEnabled()) {
+            this.beans.values().stream().sorted().forEach(def -> {
+                logger.debug("bean initialized: {}", def);
+            });
+        }
+    }
+
+    @Override
+    public void close() {
+        logger.info("Closing {}...", this.getClass().getName());
+        this.beans.values().forEach(this::destroyBean);
+        this.beans.clear();
+        this.creatingBeanNames = null;
+        this.beanPostProcessors.clear();
+        logger.info("{} closed.", this.getClass().getName());
+        ApplicationContextContainer.setApplicationContext(null);
     }
 
     /**
@@ -315,12 +334,6 @@ public class AnnotationConfigApplicationContext {
         createConfigurationBeans();
         createBeanPostProcessorsBeans();
         createNormalBeans();
-
-        if (logger.isDebugEnabled()) {
-            this.beans.values().stream().sorted().forEach(def -> {
-                logger.debug("bean initialized: {}", def);
-            });
-        }
     }
 
     /**
@@ -371,6 +384,7 @@ public class AnnotationConfigApplicationContext {
     /**
      * 创建一个Bean，但不进行字段和方法级别的注入。如果创建的Bean不是Configuration，则在构造方法中注入的依赖Bean会自动创建。
      */
+    @Override
     public Object createBeanAsEarlySingleton(BeanDefinition def) {
         logger.debug("Try create bean '{}' as early singleton: {}", def.getName(), def.getBeanClass().getName());
         if (!this.creatingBeanNames.add(def.getName())) {
@@ -668,6 +682,16 @@ public class AnnotationConfigApplicationContext {
         });
     }
 
+    /**
+     * 调用destroy方法
+     */
+    void destroyBean(BeanDefinition def) {
+        // 获取Bean实例，或被代理的原始实例:
+        final Object beanInstance = getProxiedInstance(def);
+        // 调用destroy方法:
+        callMethod(beanInstance, def.getDestroyMethod(), def.getDestroyMethodName());
+    }
+
     private void callMethod(Object beanInstance, Method method, String namedMethod) {
         // 调用init/destroy方法:
         if (method != null) {
@@ -764,6 +788,7 @@ public class AnnotationConfigApplicationContext {
      * 根据Name查找BeanDefinition，如果Name不存在，返回null
      */
     @Nullable
+    @Override
     public BeanDefinition findBeanDefinition(String name) {
         return this.beans.get(name);
     }
@@ -772,6 +797,7 @@ public class AnnotationConfigApplicationContext {
      * 根据Name和Type查找BeanDefinition，如果Name不存在，返回null，如果Name存在，但Type不匹配，抛出异常。
      */
     @Nullable
+    @Override
     public BeanDefinition findBeanDefinition(String name, Class<?> requiredType) {
         BeanDefinition def = findBeanDefinition(name);
         if (def == null) {
@@ -787,6 +813,7 @@ public class AnnotationConfigApplicationContext {
     /**
      * 根据Type查找若干个BeanDefinition，返回0个或多个。
      */
+    @Override
     public List<BeanDefinition> findBeanDefinitions(Class<?> type) {
         return this.beans.values().stream()
                 // filter by type and sub-type:
@@ -799,6 +826,7 @@ public class AnnotationConfigApplicationContext {
      * 根据Type查找某个BeanDefinition，如果不存在返回null，如果存在多个返回@Primary标注的一个，如果有多个@Primary标注，或没有@Primary标注但找到多个，均抛出NoUniqueBeanDefinitionException
      */
     @Nullable
+    @Override
     public BeanDefinition findBeanDefinition(Class<?> type) {
         List<BeanDefinition> defs = findBeanDefinitions(type);
         if (defs.isEmpty()) {
@@ -822,6 +850,7 @@ public class AnnotationConfigApplicationContext {
     /**
      * 通过Name查找Bean，不存在时抛出NoSuchBeanDefinitionException
      */
+    @Override
     @SuppressWarnings("unchecked")
     public <T> T getBean(String name) {
         BeanDefinition def = this.beans.get(name);
@@ -834,6 +863,7 @@ public class AnnotationConfigApplicationContext {
     /**
      * 通过Name和Type查找Bean，不存在抛出NoSuchBeanDefinitionException，存在但与Type不匹配抛出BeanNotOfRequiredTypeException
      */
+    @Override
     public <T> T getBean(String name, Class<T> requiredType) {
         T t = findBean(name, requiredType);
         if (t == null) {
@@ -845,6 +875,7 @@ public class AnnotationConfigApplicationContext {
     /**
      * 通过Type查找Beans
      */
+    @Override
     @SuppressWarnings("unchecked")
     public <T> List<T> getBeans(Class<T> requiredType) {
         List<BeanDefinition> defs = findBeanDefinitions(requiredType);
@@ -861,6 +892,7 @@ public class AnnotationConfigApplicationContext {
     /**
      * 通过Type查找Bean，不存在抛出NoSuchBeanDefinitionException，存在多个但缺少唯一@Primary标注抛出NoUniqueBeanDefinitionException
      */
+    @Override
     @SuppressWarnings("unchecked")
     public <T> T getBean(Class<T> requiredType) {
         BeanDefinition def = findBeanDefinition(requiredType);
@@ -873,6 +905,7 @@ public class AnnotationConfigApplicationContext {
     /**
      * 检测是否存在指定Name的Bean
      */
+    @Override
     public boolean containsBean(String name) {
         return this.beans.containsKey(name);
     }
