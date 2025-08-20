@@ -23,6 +23,8 @@ public class AnnotationConfigApplicationContext {
 
     private Map<String, BeanDefinition> beans = new HashMap<String, BeanDefinition>();
     private Set<String> creatingBeanNames;
+    private List<BeanPostProcessor> beanPostProcessors = new ArrayList<>();
+
     private final PropertyResolver propertyResolver;
 
     private final String SUFFIX = ".class";
@@ -311,6 +313,7 @@ public class AnnotationConfigApplicationContext {
         this.creatingBeanNames = new HashSet<>();
 
         createConfigurationBeans();
+        createBeanPostProcessorsBeans();
         createNormalBeans();
 
         if (logger.isDebugEnabled()) {
@@ -321,7 +324,7 @@ public class AnnotationConfigApplicationContext {
     }
 
     /**
-     * 创建Configuration的Bean
+     * 创建@Configuration的Bean
      */
     void createConfigurationBeans() {
         this.beans.values().stream()
@@ -332,6 +335,21 @@ public class AnnotationConfigApplicationContext {
                 // 遍历每个 BeanDefinition，进行早期实例化
                 .forEach(this::createBeanAsEarlySingleton);
     }
+
+    /**
+     *  创建BeanPostProcessor类型的Bean:
+     */
+    void createBeanPostProcessorsBeans() {
+        List<BeanPostProcessor> processors = this.beans.values().stream()
+                // 过滤出BeanPostProcessor:
+                .filter(this::isBeanPostProcessorDefinition)
+                // 排序:
+                .sorted()
+                // 创建BeanPostProcessor实例:
+                .map(def -> (BeanPostProcessor) createBeanAsEarlySingleton(def)).toList();
+        this.beanPostProcessors.addAll(processors);
+    }
+
 
     /**
      * 创建普通的Bean
@@ -354,7 +372,7 @@ public class AnnotationConfigApplicationContext {
      * 创建一个Bean，但不进行字段和方法级别的注入。如果创建的Bean不是Configuration，则在构造方法中注入的依赖Bean会自动创建。
      */
     public Object createBeanAsEarlySingleton(BeanDefinition def) {
-        logger.atDebug().log("Try create bean '{}' as early singleton: {}", def.getName(), def.getBeanClass().getName());
+        logger.debug("Try create bean '{}' as early singleton: {}", def.getName(), def.getBeanClass().getName());
         if (!this.creatingBeanNames.add(def.getName())) {
             throw new UnsatisfiedDependencyException(String.format("Circular dependency detected when create bean '%s'", def.getName()));
         }
@@ -414,7 +432,7 @@ public class AnnotationConfigApplicationContext {
                 if (dependsOnDef != null) {
                     // 获取依赖Bean:
                     Object autowiredBeanInstance = dependsOnDef.getInstance();
-                    if (autowiredBeanInstance == null && !isConfiguration) {
+                    if (autowiredBeanInstance == null) {
                         // 当前依赖Bean尚未初始化，递归调用初始化该依赖Bean:
                         autowiredBeanInstance = createBeanAsEarlySingleton(dependsOnDef);
                     }
@@ -444,6 +462,15 @@ public class AnnotationConfigApplicationContext {
             }
         }
         def.setInstance(instance);
+
+        // 调用BeanPostProcessor处理Bean:
+        for (BeanPostProcessor processor : beanPostProcessors) {
+            Object processedInstance = processor.postProcessBeforeInitialization(def.getInstance(), def.getName());
+            // 如果一个BeanPostProcessor替换了原始Bean，则更新Bean的引用:
+            if (def.getInstance() != processedInstance) {
+                def.setInstance(processedInstance);
+            }
+        }
         return def.getInstance();
     }
 
@@ -451,8 +478,10 @@ public class AnnotationConfigApplicationContext {
      * 注入依赖但不调用init方法
      */
     void injectBean(BeanDefinition def) {
+        // 获取Bean实例，或被代理的原始实例:
+        final Object beanInstance = getProxiedInstance(def);
         try {
-            injectProperties(def, def.getBeanClass(), def.getInstance());
+            injectProperties(def, def.getBeanClass(), beanInstance);
         } catch (ReflectiveOperationException e) {
             throw new BeanCreationException(e);
         }
@@ -621,8 +650,22 @@ public class AnnotationConfigApplicationContext {
      * 调用init方法
      */
     void initBean(BeanDefinition def) {
+        // 获取Bean实例，或被代理的原始实例:
+        final Object beanInstance = getProxiedInstance(def);
         // 调用init方法:
-        callMethod(def.getInstance(), def.getInitMethod(), def.getInitMethodName());
+        callMethod(beanInstance, def.getInitMethod(), def.getInitMethodName());
+        // 调用BeanPostProcessor.postProcessAfterInitialization() 代理完成初始化后的原始实例
+        beanPostProcessors.forEach(beanPostProcessor -> {
+            Object processedInstance = beanPostProcessor.postProcessAfterInitialization(def.getInstance(), def.getName());
+            if (processedInstance != def.getInstance()) {
+                logger.debug("BeanPostProcessor {} return different bean from {} to {}.",
+                        beanPostProcessor.getClass().getSimpleName(),
+                        def.getInstance().getClass().getName(),
+                        processedInstance.getClass().getName());
+
+                def.setInstance(processedInstance);
+            }
+        });
     }
 
     private void callMethod(Object beanInstance, Method method, String namedMethod) {
@@ -645,8 +688,46 @@ public class AnnotationConfigApplicationContext {
         }
     }
 
+    /**
+     * 获取用于属性注入的原始对象实例。
+     */
+    private Object getProxiedInstance(BeanDefinition def) {
+        // 从 BeanDefinition 中获取当前的 Bean 实例
+        // 注意：此时可能是代理对象，而不是原始对象
+        Object beanInstance = def.getInstance();
+
+        // 如果Proxy改变了原始Bean，又希望注入到原始Bean，则由BeanPostProcessor指定原始Bean:
+        // 拷贝一份 BeanPostProcessor 列表，并反转顺序
+        // 这样保证：最后一个包装代理的 Processor，最先有机会恢复原始对象
+        List<BeanPostProcessor> reversedBeanPostProcessors = new ArrayList<>(this.beanPostProcessors);
+        Collections.reverse(reversedBeanPostProcessors);
+
+        // 遍历所有 BeanPostProcessor，看是否需要恢复成原始 Bean
+        for (BeanPostProcessor beanPostProcessor : reversedBeanPostProcessors) {
+            // 调用 postProcessOnSetProperty 让 BPP 有机会替换实例
+            Object restoredInstance = beanPostProcessor.postProcessOnSetProperty(beanInstance, def.getName());
+
+            // 如果 BPP 返回的对象和当前的不一样，说明发生了替换（例如从代理换回原始对象）
+            if (restoredInstance != beanInstance) {
+                logger.debug("BeanPostProcessor {} specified injection from {} to {}.",
+                        beanPostProcessor.getClass().getSimpleName(),
+                        beanInstance.getClass().getSimpleName(),     // 原来的实例类型（可能是代理）
+                        restoredInstance.getClass().getSimpleName());// 替换后的实例类型（可能是原始 Bean）
+                // 更新为恢复后的对象
+                beanInstance = restoredInstance;
+            }
+        }
+        // 返回最终用于属性注入的实例
+        // （可能仍然是代理，也可能被还原为原始 Bean）
+        return beanInstance;
+    }
+
     boolean isConfigurationDefinition(BeanDefinition def) {
         return ClassUtils.findAnnotation(def.getBeanClass(), Configuration.class) != null;
+    }
+
+    boolean isBeanPostProcessorDefinition(BeanDefinition def) {
+        return BeanPostProcessor.class.isAssignableFrom(def.getBeanClass());
     }
 
     /**

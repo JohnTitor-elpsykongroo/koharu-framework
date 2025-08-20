@@ -11,6 +11,10 @@ import com.itranswarp.scan.nested.OuterBean;
 import com.itranswarp.scan.primary.DogBean;
 import com.itranswarp.scan.primary.PersonBean;
 import com.itranswarp.scan.primary.TeacherBean;
+import com.itranswarp.scan.proxy.InjectProxyOnConstructorBean;
+import com.itranswarp.scan.proxy.InjectProxyOnPropertyBean;
+import com.itranswarp.scan.proxy.OriginBean;
+import com.itranswarp.scan.proxy.SecondProxyBean;
 import com.itranswarp.scan.sub1.Sub1Bean;
 import com.itranswarp.scan.sub1.sub2.Sub2Bean;
 import com.itranswarp.scan.sub1.sub2.sub3.Sub3Bean;
@@ -115,6 +119,25 @@ public class AnnotationConfigApplicationContextTest {
         ctx.getBean(Sub1Bean.class);
         ctx.getBean(Sub2Bean.class);
         ctx.getBean(Sub3Bean.class);
+    }
+
+    @Test
+    public void testProxy() {
+        var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        // test proxy:
+        OriginBean proxy = ctx.getBean(OriginBean.class);
+        assertSame(SecondProxyBean.class, proxy.getClass());
+        assertEquals("Scan App", proxy.getName());
+        assertEquals("v1.0", proxy.getVersion());
+        // make sure proxy.field is not injected:
+        assertNull(proxy.name);
+        assertNull(proxy.version);
+
+        // other beans are injected proxy instance:
+        var inject1 = ctx.getBean(InjectProxyOnPropertyBean.class);
+        var inject2 = ctx.getBean(InjectProxyOnConstructorBean.class);
+        assertSame(proxy, inject1.injected);
+        assertSame(proxy, inject2.injected);
     }
 
 
