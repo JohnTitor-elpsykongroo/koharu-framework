@@ -1,16 +1,120 @@
 package com.johntitor.koharu.context;
 
+import com.itranswarp.imported.LocalDateConfiguration;
+import com.itranswarp.imported.ZonedDateConfiguration;
 import com.itranswarp.scan.ScanApplication;
+import com.itranswarp.scan.annotation.CustomAnnotationBean;
+import com.itranswarp.scan.convert.ValueConverterBean;
+import com.itranswarp.scan.init.AnnotationInitBean;
+import com.itranswarp.scan.init.SpecifyInitBean;
+import com.itranswarp.scan.nested.OuterBean;
+import com.itranswarp.scan.primary.DogBean;
+import com.itranswarp.scan.primary.PersonBean;
+import com.itranswarp.scan.primary.TeacherBean;
+import com.itranswarp.scan.sub1.Sub1Bean;
+import com.itranswarp.scan.sub1.sub2.Sub2Bean;
+import com.itranswarp.scan.sub1.sub2.sub3.Sub3Bean;
 import com.johntitor.koharu.io.PropertyResolver;
 import org.junit.jupiter.api.Test;
 
+import java.time.*;
 import java.util.Properties;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class AnnotationConfigApplicationContextTest {
 
     @Test
-    public void testAnnotationConfigApplicationContext() {
+    public void testCustomAnnotation() {
         var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        assertNotNull(ctx.getBean(CustomAnnotationBean.class));
+        assertNotNull(ctx.getBean("customAnnotation"));
+    }
+
+    @Test
+    public void testInitMethod() {
+        var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        // test @PostConstruct:
+        var bean1 = ctx.getBean(AnnotationInitBean.class);
+        var bean2 = ctx.getBean(SpecifyInitBean.class);
+        assertEquals("Scan App / v1.0", bean1.appName);
+        assertEquals("Scan App / v1.0", bean2.appName);
+    }
+
+    @Test
+    public void testImport() {
+        var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        assertNotNull(ctx.getBean(LocalDateConfiguration.class));
+        assertNotNull(ctx.getBean("startLocalDate"));
+        assertNotNull(ctx.getBean("startLocalDateTime"));
+        assertNotNull(ctx.getBean(ZonedDateConfiguration.class));
+        assertNotNull(ctx.getBean("startZonedDateTime"));
+    }
+
+    @Test
+    public void testConverter() {
+        var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        var bean = ctx.getBean(ValueConverterBean.class);
+
+        assertNotNull(bean.injectedBoolean);
+        assertTrue(bean.injectedBooleanPrimitive);
+        assertTrue(bean.injectedBoolean);
+
+        assertNotNull(bean.injectedByte);
+        assertEquals((byte) 123, bean.injectedByte);
+        assertEquals((byte) 123, bean.injectedBytePrimitive);
+
+        assertNotNull(bean.injectedShort);
+        assertEquals((short) 12345, bean.injectedShort);
+        assertEquals((short) 12345, bean.injectedShortPrimitive);
+
+        assertNotNull(bean.injectedInteger);
+        assertEquals(1234567, bean.injectedInteger);
+        assertEquals(1234567, bean.injectedIntPrimitive);
+
+        assertNotNull(bean.injectedLong);
+        assertEquals(123456789_000L, bean.injectedLong);
+        assertEquals(123456789_000L, bean.injectedLongPrimitive);
+
+        assertNotNull(bean.injectedFloat);
+        assertEquals(12345.6789F, bean.injectedFloat, 0.0001F);
+        assertEquals(12345.6789F, bean.injectedFloatPrimitive, 0.0001F);
+
+        assertNotNull(bean.injectedDouble);
+        assertEquals(123456789.87654321, bean.injectedDouble, 0.0000001);
+        assertEquals(123456789.87654321, bean.injectedDoublePrimitive, 0.0000001);
+
+        assertEquals(LocalDate.parse("2023-03-29"), bean.injectedLocalDate);
+        assertEquals(LocalTime.parse("20:45:01"), bean.injectedLocalTime);
+        assertEquals(LocalDateTime.parse("2023-03-29T20:45:01"), bean.injectedLocalDateTime);
+        assertEquals(ZonedDateTime.parse("2023-03-29T20:45:01+08:00[Asia/Shanghai]"), bean.injectedZonedDateTime);
+        assertEquals(Duration.parse("P2DT3H4M"), bean.injectedDuration);
+        assertEquals(ZoneId.of("Asia/Shanghai"), bean.injectedZoneId);
+    }
+
+    @Test
+    public void testNested() {
+        var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        ctx.getBean(OuterBean.class);
+        ctx.getBean(OuterBean.NestedBean.class);
+    }
+
+    @Test
+    public void testPrimary() {
+        var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        var person = ctx.getBean(PersonBean.class);
+        assertEquals(TeacherBean.class, person.getClass());
+        var dog = ctx.getBean(DogBean.class);
+        assertEquals("Husky", dog.type);
+    }
+
+    @Test
+    public void testSub() {
+        var ctx = new AnnotationConfigApplicationContext(ScanApplication.class, createPropertyResolver());
+        ctx.getBean(Sub1Bean.class);
+        ctx.getBean(Sub2Bean.class);
+        ctx.getBean(Sub3Bean.class);
     }
 
 

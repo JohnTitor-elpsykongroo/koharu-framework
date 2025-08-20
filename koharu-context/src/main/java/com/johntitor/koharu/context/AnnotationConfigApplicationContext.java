@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.annotation.Annotation;
 import java.lang.reflect.*;
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 public class AnnotationConfigApplicationContext {
@@ -38,6 +39,12 @@ public class AnnotationConfigApplicationContext {
         this.beans = createBeanDefinitions(beanClassNames);
 
         createBeanInstances();
+
+        // 通过字段和set方法注入依赖:
+        this.beans.values().forEach(this::injectBean);
+
+        // 调用init方法:
+        this.beans.values().forEach(this::initBean);
     }
 
     /**
@@ -180,6 +187,43 @@ public class AnnotationConfigApplicationContext {
     }
 
     /**
+     * 根据规则获取类的合适构造函数。
+     * <p>
+     * 规则：
+     * 1. 优先尝试获取所有 public 构造函数；
+     * - 如果有且仅有 1 个 public 构造函数，则直接返回。
+     * - 如果有多个 public 构造函数，则抛出异常（因为框架没法自动决定用哪个）。
+     * <p>
+     * 2. 如果没有 public 构造函数，则退而求其次，获取 declared 构造函数（包括 private/protected/package-private）。
+     * - 如果只有 1 个 declared 构造函数，则返回它。
+     * - 如果有多个 declared 构造函数，则抛出异常（因为存在歧义）。
+     * <p>
+     * 总结：只能接受“唯一可选”的构造函数，否则抛出异常。
+     */
+    Constructor<?> getSuitableConstructor(Class<?> clazz) {
+        // 1. 获取所有 public 构造函数
+        Constructor<?>[] cons = clazz.getConstructors();
+
+        // 2. 如果没有 public 构造函数，则获取 declared 构造函数
+        if (cons.length == 0) {
+            cons = clazz.getDeclaredConstructors();
+
+            // declared 构造函数数量必须唯一，否则抛异常
+            if (cons.length != 1) {
+                throw new BeanDefinitionException("More than one constructor found in class " + clazz.getName() + ".");
+            }
+        }
+
+        // 3. 如果有多个 public 构造函数，也不允许（必须唯一）
+        if (cons.length != 1) {
+            throw new BeanDefinitionException("More than one public constructor found in class " + clazz.getName() + ".");
+        }
+
+        // 4. 返回唯一可用的构造函数
+        return cons[0];
+    }
+
+    /**
      * 扫描指定类中标注了 @Bean 的方法，将其转换为 BeanDefinition 并注册到 defs 中
      * <p>
      * <code>
@@ -248,6 +292,15 @@ public class AnnotationConfigApplicationContext {
                 // 打印调试日志，输出定义的 Bean 信息
                 logger.debug("define bean: {}", def);
             }
+        }
+    }
+
+    /**
+     * 添加bean定义类至beans，避免重复添加
+     */
+    void addBeanDefinitions(Map<String, BeanDefinition> defs, BeanDefinition def) {
+        if (defs.put(def.getName(), def) != null) {
+            throw new BeanDefinitionException("Duplicate bean name: " + def.getName());
         }
     }
 
@@ -394,58 +447,207 @@ public class AnnotationConfigApplicationContext {
         return def.getInstance();
     }
 
+    /**
+     * 注入依赖但不调用init方法
+     */
+    void injectBean(BeanDefinition def) {
+        try {
+            injectProperties(def, def.getBeanClass(), def.getInstance());
+        } catch (ReflectiveOperationException e) {
+            throw new BeanCreationException(e);
+        }
+    }
+
+    /**
+     * 注入属性
+     */
+    void injectProperties(BeanDefinition def, Class<?> clazz, Object bean) throws ReflectiveOperationException {
+        // 在当前类查找Field和Method并注入:
+        for (Field f : clazz.getDeclaredFields()) {
+            tryInjectProperties(def, clazz, bean, f);
+        }
+        for (Method m : clazz.getDeclaredMethods()) {
+            tryInjectProperties(def, clazz, bean, m);
+        }
+        // 在父类查找Field和Method并注入:
+        Class<?> superClazz = clazz.getSuperclass();
+        if (superClazz != null) {
+            injectProperties(def, superClazz, bean);
+        }
+    }
+
+    /**
+     * 注入单个属性
+     */
+    // ================== Field 注入 ==================
+    void tryInjectProperties(BeanDefinition def, Class<?> clazz, Object bean, Field field) throws ReflectiveOperationException {
+        Value value = field.getAnnotation(Value.class);
+        Autowired autowired = field.getAnnotation(Autowired.class);
+
+        if (value == null && autowired == null) {
+            return;
+        }
+
+        checkFieldOrMethod(field);
+        field.setAccessible(true);
+
+        doInject(def, clazz, bean,
+                field.getName(),
+                field.getType(),
+                value,
+                autowired,
+                (target, val) -> {
+                    try {
+                        field.set(target, val);
+                    } catch (IllegalAccessException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                "Field");
+    }
+
+    // ================== Method 注入 ==================
+    void tryInjectProperties(BeanDefinition def, Class<?> clazz, Object bean, Method method) throws ReflectiveOperationException {
+        Value value = method.getAnnotation(Value.class);
+        Autowired autowired = method.getAnnotation(Autowired.class);
+
+        if (value == null && autowired == null) {
+            return;
+        }
+
+        checkFieldOrMethod(method);
+        if (method.getParameterCount() != 1) {
+            throw new BeanDefinitionException(String.format(
+                    "Cannot inject a non-setter method %s for bean '%s': %s",
+                    method.getName(), def.getName(), def.getBeanClass().getName()));
+        }
+        method.setAccessible(true);
+
+        doInject(def, clazz, bean,
+                method.getName(),
+                method.getParameterTypes()[0],
+                value,
+                autowired,
+                (target, val) -> {
+                    try {
+                        method.invoke(target, val);
+                    } catch (IllegalAccessException | InvocationTargetException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                "Method");
+    }
+
+
+    // ================== 公共注入逻辑 ==================
+
+    /**
+     * 处理 @Value 和 @Autowired 注入逻辑的公共方法。
+     *
+     * @param def            BeanDefinition 定义
+     * @param clazz          当前正在注入的类
+     * @param bean           需要注入属性的实例对象
+     * @param accessibleName 可注入成员名称（field 名称或 method 名称）
+     * @param accessibleType 可注入成员类型（field 类型或 setter 参数类型）
+     * @param value          @Value 注解（可能为 null）
+     * @param autowired      @Autowired 注解（可能为 null）
+     * @param injector       最终执行注入的动作 (targetBean, value) -> {}
+     * @param injectType     执行任务类型
+     */
+    private void doInject(BeanDefinition def, Class<?> clazz, Object bean,
+                          String accessibleName, Class<?> accessibleType,
+                          Value value, Autowired autowired,
+                          BiConsumer<Object, Object> injector,
+                          String injectType) throws ReflectiveOperationException {
+
+        // 如果没有注解，直接返回
+        if (value == null && autowired == null) {
+            return;
+        }
+
+        // 同时存在 @Value 和 @Autowired 属于非法用法
+        if (value != null && autowired != null) {
+            throw new BeanCreationException(String.format(
+                    "Cannot specify both @Autowired and @Value when inject %s.%s for bean '%s': %s",
+                    clazz.getSimpleName(), accessibleName, def.getName(), def.getBeanClass().getName()));
+        }
+
+        // @Value 注入配置属性
+        if (value != null) {
+            Object propValue = this.propertyResolver.getRequiredProperty(value.value(), accessibleType);
+            logger.debug("{} Injection via @Value: {}.{} = {}", injectType, def.getBeanClass().getName(), accessibleName, propValue);
+            injector.accept(bean, propValue);
+        }
+
+        // @Autowired 注入依赖 Bean
+        if (autowired != null) {
+            String name = autowired.name();
+            boolean required = autowired.value();
+            Object depends = name.isEmpty() ? findBean(accessibleType) : findBean(name, accessibleType);
+
+            // 必须依赖缺失则抛异常
+            if (required && depends == null) {
+                throw new UnsatisfiedDependencyException(String.format(
+                        "Dependency bean not found when inject %s.%s for bean '%s': %s",
+                        clazz.getSimpleName(), accessibleName, def.getName(), def.getBeanClass().getName()));
+            }
+
+            // 找到依赖则注入
+            if (depends != null) {
+                logger.debug("{} Injection via @Autowired: {}.{} = {}", injectType, def.getBeanClass().getName(), accessibleName, depends);
+                injector.accept(bean, depends);
+            }
+        }
+    }
+
+
+    void checkFieldOrMethod(Member m) {
+        int mod = m.getModifiers();
+        if (Modifier.isStatic(mod)) {
+            throw new BeanDefinitionException("Cannot inject static field: " + m);
+        }
+        if (Modifier.isFinal(mod)) {
+            if (m instanceof Field field) {
+                throw new BeanDefinitionException("Cannot inject final field: " + field);
+            }
+            if (m instanceof Method method) {
+                logger.warn(
+                        "Inject final method should be careful because it is not called on target bean when bean is proxied and may cause NullPointerException.");
+            }
+        }
+    }
+
+    /**
+     * 调用init方法
+     */
+    void initBean(BeanDefinition def) {
+        // 调用init方法:
+        callMethod(def.getInstance(), def.getInitMethod(), def.getInitMethodName());
+    }
+
+    private void callMethod(Object beanInstance, Method method, String namedMethod) {
+        // 调用init/destroy方法:
+        if (method != null) {
+            try {
+                method.invoke(beanInstance);
+            } catch (ReflectiveOperationException e) {
+                throw new BeanCreationException(e);
+            }
+        } else if (namedMethod != null) {
+            // 查找initMethod/destroyMethod="xyz"，注意是在实际类型中查找:
+            Method named = ClassUtils.getNamedMethod(beanInstance.getClass(), namedMethod);
+            named.setAccessible(true);
+            try {
+                named.invoke(beanInstance);
+            } catch (ReflectiveOperationException e) {
+                throw new BeanCreationException(e);
+            }
+        }
+    }
+
     boolean isConfigurationDefinition(BeanDefinition def) {
         return ClassUtils.findAnnotation(def.getBeanClass(), Configuration.class) != null;
     }
-
-
-
-    /**
-     * 根据规则获取类的合适构造函数。
-     * <p>
-     * 规则：
-     * 1. 优先尝试获取所有 public 构造函数；
-     * - 如果有且仅有 1 个 public 构造函数，则直接返回。
-     * - 如果有多个 public 构造函数，则抛出异常（因为框架没法自动决定用哪个）。
-     * <p>
-     * 2. 如果没有 public 构造函数，则退而求其次，获取 declared 构造函数（包括 private/protected/package-private）。
-     * - 如果只有 1 个 declared 构造函数，则返回它。
-     * - 如果有多个 declared 构造函数，则抛出异常（因为存在歧义）。
-     * <p>
-     * 总结：只能接受“唯一可选”的构造函数，否则抛出异常。
-     */
-    Constructor<?> getSuitableConstructor(Class<?> clazz) {
-        // 1. 获取所有 public 构造函数
-        Constructor<?>[] cons = clazz.getConstructors();
-
-        // 2. 如果没有 public 构造函数，则获取 declared 构造函数
-        if (cons.length == 0) {
-            cons = clazz.getDeclaredConstructors();
-
-            // declared 构造函数数量必须唯一，否则抛异常
-            if (cons.length != 1) {
-                throw new BeanDefinitionException("More than one constructor found in class " + clazz.getName() + ".");
-            }
-        }
-
-        // 3. 如果有多个 public 构造函数，也不允许（必须唯一）
-        if (cons.length != 1) {
-            throw new BeanDefinitionException("More than one public constructor found in class " + clazz.getName() + ".");
-        }
-
-        // 4. 返回唯一可用的构造函数
-        return cons[0];
-    }
-
-    /**
-     * 添加bean定义类至beans，避免重复添加
-     */
-    void addBeanDefinitions(Map<String, BeanDefinition> defs, BeanDefinition def) {
-        if (defs.put(def.getName(), def) != null) {
-            throw new BeanDefinitionException("Duplicate bean name: " + def.getName());
-        }
-    }
-
 
     /**
      * Get order by:
