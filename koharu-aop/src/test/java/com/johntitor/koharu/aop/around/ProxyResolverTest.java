@@ -1,6 +1,10 @@
-package com.johntitor.koharu.aop;
+package com.johntitor.koharu.aop.around;
 
+import com.johntitor.koharu.aop.ProxyResolver;
+import com.johntitor.koharu.io.PropertyResolver;
 import org.junit.jupiter.api.Test;
+
+import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -14,7 +18,7 @@ public class ProxyResolverTest {
         assertEquals("Hello, Bob.", origin.hello());
 
         // create proxy:
-        OriginBean proxy = new ProxyResolver().createProxy(origin, new PoliteInvocationHandler());
+        OriginBean proxy = ProxyResolver.getInstance().createProxy(origin, new PoliteInvocationHandler());
 
         // Proxy类名,类似OriginBean$ByteBuddy$9hQwRy3T:
         System.out.println(proxy.getClass().getName());

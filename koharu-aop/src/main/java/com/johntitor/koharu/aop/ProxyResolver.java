@@ -18,6 +18,19 @@ public class ProxyResolver {
     // ByteBuddy实例:
     private final ByteBuddy byteBuddy = new ByteBuddy();
 
+    private static ProxyResolver INSTANCE = null;
+
+    private ProxyResolver() {
+
+    }
+
+    public static ProxyResolver getInstance() {
+        if(INSTANCE == null){
+            INSTANCE = new ProxyResolver();
+        }
+        return INSTANCE;
+    }
+
     public <T> T createProxy(T bean, InvocationHandler handler) {
         // 目标Bean的Class类型:
         Class<?> targetClass = bean.getClass();
