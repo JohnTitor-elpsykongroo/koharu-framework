@@ -2,12 +2,17 @@ package com.johntitor.koharu.jdbc;
 
 import com.johntitor.koharu.annotation.Autowired;
 import com.johntitor.koharu.annotation.Bean;
+import com.johntitor.koharu.annotation.Configuration;
 import com.johntitor.koharu.annotation.Value;
+import com.johntitor.koharu.jdbc.tx.DataSourceTransactionManager;
+import com.johntitor.koharu.jdbc.tx.PlatformTransactionManager;
+import com.johntitor.koharu.jdbc.tx.TransactionalBeanPostProcessor;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
 import javax.sql.DataSource;
 
+@Configuration
 public class JdbcConfiguration {
 
     @Bean(destroyMethod = "close")
@@ -39,4 +44,15 @@ public class JdbcConfiguration {
     JdbcTemplate jdbcTemplate(@Autowired DataSource dataSource) {
         return new JdbcTemplate(dataSource);
     }
+
+    @Bean
+    TransactionalBeanPostProcessor transactionalBeanPostProcessor() {
+        return new TransactionalBeanPostProcessor();
+    }
+
+    @Bean
+    PlatformTransactionManager platformTransactionManager(@Autowired DataSource dataSource) {
+        return new DataSourceTransactionManager(dataSource);
+    }
+
 }

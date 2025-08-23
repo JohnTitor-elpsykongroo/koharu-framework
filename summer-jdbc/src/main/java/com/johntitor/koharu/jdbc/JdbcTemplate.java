@@ -6,11 +6,20 @@ import com.johntitor.koharu.jdbc.mapper.impl.BeanRowMapper;
 import com.johntitor.koharu.jdbc.mapper.impl.BooleanRowMapper;
 import com.johntitor.koharu.jdbc.mapper.impl.NumberRowMapper;
 import com.johntitor.koharu.jdbc.mapper.impl.StringRowMapper;
+import com.johntitor.koharu.jdbc.tx.TransactionalContainer;
 
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+
+/**
+ * 获取连接，并执行 -> execute(ConnectionCallback)
+ * 设置根据connection创建SQL语句对象，绑定参数的方法 -> PreparedStatementCreator
+ * 设置执行语句的方法 -> PreparedStatementCallback
+ * 根据PreparedStatementCreator获取到SQL语句对象，并使用PreparedStatementCallback的方法去执行
+ * -> execute(PreparedStatementCreator, PreparedStatementCallback<T>)
+ */
 
 public class JdbcTemplate {
 
@@ -22,15 +31,25 @@ public class JdbcTemplate {
 
     /**
      * Connection自动连接释放
-     * */
+     */
     public <T> T execute(ConnectionCallback<T> connectionAction) throws DataAccessException {
-        try (Connection newConnection = dataSource.getConnection()){
+        // 尝试获取当前事务连接:
+        Connection currentConnection = TransactionalContainer.getCurrentConnection();
+        if (currentConnection != null) {
+            try{
+                return connectionAction.doInConnection(currentConnection);
+            } catch (SQLException e) {
+                throw new DataAccessException(e);
+            }
+        }
+
+        try (Connection newConnection = dataSource.getConnection()) {
             final boolean autoCommit = newConnection.getAutoCommit();
             if (!autoCommit) {
                 newConnection.setAutoCommit(true);
             }
             T result = connectionAction.doInConnection(newConnection);
-            if (!autoCommit){
+            if (!autoCommit) {
                 newConnection.setAutoCommit(false);
             }
             return result;

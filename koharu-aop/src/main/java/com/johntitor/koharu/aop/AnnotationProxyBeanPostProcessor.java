@@ -17,12 +17,10 @@ import java.util.Map;
 
 public abstract class AnnotationProxyBeanPostProcessor<A extends Annotation> implements BeanPostProcessor {
 
-    private Map<String, Object> originBeans = new HashMap<String, Object>();
-
-    Class<A> annotationClass;
+    private final Map<String, Object> originBeans = new HashMap<String, Object>();
+    Class<A> annotationClass = this.getParameterizedType();
 
     public AnnotationProxyBeanPostProcessor() {
-        this.annotationClass = getParameterizedType();
     }
 
     @Override
