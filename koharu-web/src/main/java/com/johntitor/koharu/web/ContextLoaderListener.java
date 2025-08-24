@@ -31,6 +31,8 @@ public class ContextLoaderListener implements ServletContextListener {
                 // 读取 web.xml 或 ServletContext init-param 里的 "configuration" 参数
                 servletContext.getInitParameter("configuration"),
                 propertyResolver);
+        // 注册 filters:
+        WebUtils.registerFilters(servletContext);
         // 注册 DispatcherServlet
         WebUtils.registerDispatcherServlet(servletContext, propertyResolver);
         // 把 ApplicationContext 保存到全局
