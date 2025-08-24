@@ -14,18 +14,26 @@ public class ContextLoaderListener implements ServletContextListener {
 
     protected final Logger logger = LoggerFactory.getLogger(this.getClass());
 
+    // Web 应用启动时回调
     @Override
     public void contextInitialized(ServletContextEvent sce){
         logger.info("init {}.", getClass().getName());
-        var servletContext = sce.getServletContext();
+        // 创建配置解析器
         var propertyResolver = WebUtils.createPropertyResolver();
+        // 获取 ServletContext
+        var servletContext = sce.getServletContext();
+        // 设置请求/响应编码
         String encoding = propertyResolver.getProperty("${koharu.web.character-encoding:UTF-8}");
         servletContext.setRequestCharacterEncoding(encoding);
         servletContext.setResponseCharacterEncoding(encoding);
-        var applicationContext = createApplicationContext(servletContext.getInitParameter("configuration"), propertyResolver);
-        // register DispatcherServlet:
+        // 创建 ApplicationContext（IOC 容器）
+        var applicationContext = createApplicationContext(
+                // 读取 web.xml 或 ServletContext init-param 里的 "configuration" 参数
+                servletContext.getInitParameter("configuration"),
+                propertyResolver);
+        // 注册 DispatcherServlet
         WebUtils.registerDispatcherServlet(servletContext, propertyResolver);
-
+        // 把 ApplicationContext 保存到全局
         servletContext.setAttribute("applicationContext", applicationContext);
 
     }
@@ -37,6 +45,8 @@ public class ContextLoaderListener implements ServletContextListener {
         }
     }
 
+
+    // 创建 ApplicationContext（IOC 容器）具体方法
     private Object createApplicationContext(String configClassName, PropertyResolver propertyResolver) {
         logger.info("init ApplicationContext by configuration: {}", configClassName);
         if (configClassName == null || configClassName.isEmpty()) {
