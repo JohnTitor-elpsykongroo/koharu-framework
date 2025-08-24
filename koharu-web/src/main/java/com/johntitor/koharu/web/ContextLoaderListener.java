@@ -18,10 +18,12 @@ public class ContextLoaderListener implements ServletContextListener {
     @Override
     public void contextInitialized(ServletContextEvent sce){
         logger.info("init {}.", getClass().getName());
-        // 创建配置解析器
-        var propertyResolver = WebUtils.createPropertyResolver();
         // 获取 ServletContext
         var servletContext = sce.getServletContext();
+        // 设置 ServletContext
+        WebMvcConfiguration.setServletContext(servletContext);
+        // 创建配置解析器
+        var propertyResolver = WebUtils.createPropertyResolver();
         // 设置请求/响应编码
         String encoding = propertyResolver.getProperty("${koharu.web.character-encoding:UTF-8}");
         servletContext.setRequestCharacterEncoding(encoding);
