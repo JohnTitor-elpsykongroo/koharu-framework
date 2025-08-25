@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.johntitor.koharu</groupId>
-    <artifactId>summer-jdbc</artifactId>
+    <artifactId>koharu-jdbc</artifactId>
     <version>1.0-SNAPSHOT</version>
 
     <properties>
